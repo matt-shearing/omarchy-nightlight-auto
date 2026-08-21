@@ -29,6 +29,10 @@ Item {
   property bool busy: false
 
   readonly property bool ok: status.ok
+  // False until the user has agreed to what setup changes. Until then this
+  // plugin has written nothing to their configuration.
+  readonly property bool isSetup: status.setup
+  property string disclosure: ""
   readonly property bool running: status.running
   readonly property bool paused: status.paused
   // "Tinted" means the schedule is actually warming the screen right now, as
@@ -52,6 +56,8 @@ Item {
   function refresh() {
     if (!statusProc.running) statusProc.running = true
     if (!stepsProc.running) stepsProc.running = true
+    if (!root.isSetup && root.disclosure === "" && !disclosureProc.running)
+      disclosureProc.running = true
   }
 
   function run(args) {
@@ -60,6 +66,10 @@ Item {
     actionProc.command = [root.cli].concat(args)
     actionProc.running = true
   }
+
+  // Runs setup non-interactively. Only ever called from a control that has the
+  // disclosure text on screen next to it -- the button IS the consent.
+  function acceptSetup() { run(["setup", "--yes"]) }
 
   function pause() { run(["pause"]) }
   function resume() { run(["resume"]) }
@@ -94,6 +104,16 @@ Item {
     }
   }
 
+  // `setup --print` writes nothing; it just reports what setup would change.
+  Process {
+    id: disclosureProc
+    command: [root.cli, "setup", "--print"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.disclosure = String(text || "").trim()
+    }
+  }
+
   Process {
     id: actionProc
     onExited: {
@@ -117,6 +137,7 @@ Item {
 
     function status(): string {
       return JSON.stringify({
+        setup: root.isSetup,
         paused: root.paused,
         running: root.running,
         temperature: root.temperature,

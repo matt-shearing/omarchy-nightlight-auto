@@ -1,63 +1,81 @@
 #!/bin/bash
 
-# Install the sunset night light: the CLI, the daily timer, the post-boot hook,
-# and the bar widget. Safe to re-run; every step is idempotent.
+# Put the plugin and the CLI in place, then hand over to `nightlight-auto setup`,
+# which is where anything that actually changes your desktop gets disclosed and
+# agreed to. Placing files here starts nothing and schedules nothing.
+#
+#   ./install.sh              place files, then run setup interactively
+#   ./install.sh --no-bar     do not add the bar widget to shell.json
+#   ./install.sh --yes        accept setup's changes without prompting
+#   ./install.sh --place-only place files and stop; run setup yourself later
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ID="contra.nightlight"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
-UNIT_DIR="$HOME/.config/systemd/user"
 BIN_DIR="$HOME/.local/bin"
+CLI="$BIN_DIR/nightlight-auto"
 
-echo "Installing from $REPO"
+add_bar="true"
+place_only="false"
+assume_yes=""
 
-# 1. The CLI, so `nightlight-auto` works from a shell. The plugin calls the
-#    copy in the repo by absolute path and does not depend on this.
+while (( $# > 0 )); do
+  case "$1" in
+  --no-bar) add_bar="false" ;;
+  --place-only) place_only="true" ;;
+  --yes | -y) assume_yes="--yes" ;;
+  -h | --help)
+    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+    exit 0
+    ;;
+  *)
+    echo "install.sh: unknown option: $1" >&2
+    exit 1
+    ;;
+  esac
+  shift
+done
+
+echo "Placing files from $REPO"
+
+# The CLI. Never clobber something that is not ours.
 mkdir -p "$BIN_DIR"
-ln -sfn "$REPO/bin/nightlight-auto" "$BIN_DIR/nightlight-auto"
-echo "  cli       $BIN_DIR/nightlight-auto"
+if [[ -e $CLI && ! -L $CLI ]]; then
+  echo "  refusing to replace $CLI, which is a real file and not our symlink" >&2
+  exit 1
+fi
+ln -sfn "$REPO/bin/nightlight-auto" "$CLI"
+echo "  cli      $CLI"
 
-# 2. The bar widget. A symlink keeps one checkout; a clone works equally well.
+# The plugin. A symlink keeps one checkout; a clone works equally well.
 if [[ -e $PLUGIN_DIR && ! -L $PLUGIN_DIR ]]; then
-  echo "  plugin    $PLUGIN_DIR already exists and is not a symlink, leaving it"
+  echo "  plugin   $PLUGIN_DIR already exists and is not a symlink, leaving it"
 else
   mkdir -p "$(dirname "$PLUGIN_DIR")"
   ln -sfn "$REPO" "$PLUGIN_DIR"
-  echo "  plugin    $PLUGIN_DIR"
+  echo "  plugin   $PLUGIN_DIR"
 fi
 
-# 3. hyprsunset itself. It runs from the unit its own package ships rather than
-#    from autostart.lua: the daily rebuild has to restart it from a systemd
-#    timer, and a uwsm-launched process does not survive that.
-systemctl --user enable --now hyprsunset.service >/dev/null 2>&1 || true
-echo "  hyprsunset $(systemctl --user is-enabled hyprsunset.service 2>/dev/null || echo unknown)"
-
-# 4. Daily regeneration, because sunset moves.
-mkdir -p "$UNIT_DIR"
-install -m 644 "$REPO/systemd/nightlight-auto.service" "$UNIT_DIR/"
-install -m 644 "$REPO/systemd/nightlight-auto.timer" "$UNIT_DIR/"
-systemctl --user daemon-reload
-systemctl --user enable --now nightlight-auto.timer >/dev/null
-echo "  timer     $(systemctl --user is-enabled nightlight-auto.timer)"
-
-# 5. Rebuild when the desktop starts, so a machine that was off overnight still
-#    gets tonight's ramp rather than yesterday's.
-if omarchy-cmd-present omarchy-hook-install; then
-  omarchy hook install post-boot "$REPO/hooks/nightlight-auto.sh" >/dev/null
-  echo "  hook      post-boot.d/nightlight-auto.sh"
-fi
-
-# 6. A config file to edit, and tonight's schedule.
-"$REPO/bin/nightlight-auto" init
-"$REPO/bin/nightlight-auto" generate --force
-
-# 7. The widget in the bar. Skipped silently if it is already placed.
-if ! grep -q "$PLUGIN_ID" "$HOME/.config/omarchy/shell.json" 2>/dev/null; then
-  omarchy bar put "$PLUGIN_ID" --section center
-  echo "  bar       added to the centre section"
+# The bar widget. This is the one edit to shell.json, and it only places an
+# icon -- the schedule is not touched here.
+if [[ $add_bar == "true" ]]; then
+  if grep -q "$PLUGIN_ID" "$HOME/.config/omarchy/shell.json" 2>/dev/null; then
+    echo "  bar      already placed"
+  else
+    omarchy bar put "$PLUGIN_ID" --section center
+    echo "  bar      widget added to the centre section"
+  fi
 fi
 
 echo
-"$REPO/bin/nightlight-auto" status
+if [[ $place_only == "true" ]]; then
+  echo "Nothing is running yet. When you are ready:"
+  echo "  nightlight-auto setup"
+  exit 0
+fi
+
+# Everything with an effect on the desktop lives behind this, which prints what
+# it would change and waits for you to agree.
+exec "$REPO/bin/nightlight-auto" setup $assume_yes

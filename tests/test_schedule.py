@@ -5,6 +5,7 @@ Run with:  python3 -m pytest tests/ -q      (or: python3 tests/test_schedule.py)
 """
 
 import importlib.machinery
+import json
 import importlib.util
 import sys
 from datetime import date, datetime, timedelta
@@ -244,6 +245,120 @@ def test_validate_rejects_nonsense():
 
 def test_validate_accepts_the_defaults():
     nl.validate(settings())
+
+
+# ----------------------------------------------------------------- consent
+
+# The guarantee: until the user has agreed, this writes nothing to their
+# configuration. These drive the real script in a throwaway XDG root.
+
+import os
+import subprocess
+import tempfile
+
+CLI = str(REPO / "bin" / "nightlight-auto")
+
+
+def sandbox():
+    """A throwaway config/state root with a hand-written hyprsunset.conf in it."""
+    root = Path(tempfile.mkdtemp(prefix="nightlight-test-"))
+    (root / "cfg" / "hypr").mkdir(parents=True)
+    (root / "state").mkdir()
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    # Stub the things that would touch the real session.
+    for name in ("systemctl", "omarchy-refresh-config", "pgrep", "hyprctl"):
+        stub = bin_dir / name
+        stub.write_text("#!/bin/bash\nexit 0\n" if name != "pgrep"
+                        else "#!/bin/bash\nexit 1\n")
+        stub.chmod(0o755)
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    conf.write_text("# MINE\nprofile {\n    time = 07:00\n    identity = true\n}\n")
+    return root
+
+
+def run_cli(root, *args, stdin=""):
+    env = dict(os.environ)
+    env["XDG_CONFIG_HOME"] = str(root / "cfg")
+    env["XDG_STATE_HOME"] = str(root / "state")
+    env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+    env["TZ"] = "Australia/Brisbane"
+    return subprocess.run([CLI, *args], capture_output=True, text=True,
+                          input=stdin, env=env, timeout=60)
+
+
+def test_generate_refuses_before_consent():
+    root = sandbox()
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    before = conf.read_text()
+    result = run_cli(root, "generate")
+    assert result.returncode != 0, "generate must refuse before setup"
+    assert "setup" in result.stderr.lower()
+    assert conf.read_text() == before, "the user's config was modified anyway"
+
+
+def test_setup_without_a_tty_refuses_unless_yes():
+    root = sandbox()
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    before = conf.read_text()
+    result = run_cli(root, "setup")
+    assert result.returncode != 0
+    assert conf.read_text() == before
+    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+
+
+def test_setup_print_changes_nothing():
+    root = sandbox()
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    before = conf.read_text()
+    result = run_cli(root, "setup", "--print")
+    assert result.returncode == 0
+    assert "hyprsunset.conf" in result.stdout
+    assert conf.read_text() == before
+    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+    # and nothing was installed
+    assert not (root / "cfg" / "systemd").exists()
+
+
+def test_status_works_before_consent_and_writes_nothing():
+    root = sandbox()
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    before = conf.read_text()
+    result = run_cli(root, "status", "--json")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["setup"] is False
+    assert conf.read_text() == before
+    assert not (root / "cfg" / "nightlight-auto").exists()
+
+
+def test_setup_then_teardown_restores_the_original_config():
+    root = sandbox()
+    conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+    original = conf.read_text()
+
+    result = run_cli(root, "setup", "--yes")
+    assert result.returncode == 0, result.stderr
+    assert nl.MARKER in conf.read_text(), "setup did not write the schedule"
+    assert (root / "state" / "nightlight-auto" / "consent.json").exists()
+    assert (root / "cfg" / "systemd" / "user" / "nightlight-auto.timer").exists()
+
+    result = run_cli(root, "teardown")
+    assert result.returncode == 0, result.stderr
+    assert conf.read_text() == original, "teardown did not restore the original file"
+    assert not (root / "cfg" / "systemd" / "user" / "nightlight-auto.timer").exists()
+    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+    # consent is re-armed
+    assert run_cli(root, "generate").returncode != 0
+
+
+def test_setup_does_not_clobber_an_existing_settings_file():
+    root = sandbox()
+    settings = root / "cfg" / "nightlight-auto" / "config.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"night_temp": 2200}) + "\n")
+    assert run_cli(root, "setup", "--yes").returncode == 0
+    assert json.loads(settings.read_text())["night_temp"] == 2200
 
 
 if __name__ == "__main__":

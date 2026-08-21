@@ -31,46 +31,63 @@ Set `latitude` / `longitude` in the config if you want your actual coordinates.
 
 ## Install
 
+Installing places files. It does not change your desktop, start anything, or
+schedule anything — that happens only after you have seen exactly what it would
+change and agreed to it.
+
 ```bash
 git clone https://github.com/matt-shearing/omarchy-nightlight-auto
 cd omarchy-nightlight-auto
 ./install.sh
 ```
 
-`install.sh` is idempotent and does six things:
+`install.sh` symlinks the `nightlight-auto` CLI into `~/.local/bin`, links the plugin
+into `~/.config/omarchy/plugins/`, adds the bar widget, and then hands over to
+`nightlight-auto setup`, which prints the list below and waits for you to type `yes`:
 
-1. symlinks `nightlight-auto` into `~/.local/bin`
-2. links the plugin into `~/.config/omarchy/plugins/contra.nightlight`
-3. enables `hyprsunset.service` (see [below](#hyprsunset-runs-from-systemd-not-autostartlua))
-4. installs and enables `nightlight-auto.timer`, which rebuilds the ramp daily
-5. installs a `post-boot` hook, so a machine that was off overnight still gets tonight's ramp
-6. writes a config file and generates tonight's schedule
+- `~/.config/hypr/hyprsunset.conf` — replaced with a generated schedule. Whatever is
+  there now is copied to `hyprsunset.conf.pre-nightlight-auto` first.
+- `systemctl --user enable --now hyprsunset.service` — see
+  [below](#hyprsunset-runs-from-systemd-not-autostartlua). Warns if `autostart.lua`
+  already launches hyprsunset, since two launch paths race for its socket.
+- `~/.config/systemd/user/nightlight-auto.{service,timer}` — the daily rebuild.
+- `~/.config/omarchy/hooks/post-boot.d/nightlight-auto.sh` — rebuild at login.
+- `~/.config/nightlight-auto/config.json` — created only if you do not have one.
 
-It edits only your own config. Nothing under `/usr/share/omarchy` is touched, and your
-existing `hyprsunset.conf` is backed up the first time.
+Say no and nothing is written. Nothing under `/usr/share/omarchy` is touched at any
+point, and nothing reaches the network.
+
+Useful flags: `--place-only` stops after placing files, `--no-bar` skips the widget,
+`--yes` accepts the changes without prompting.
+
+### Installing from the marketplace
+
+`omarchy plugin add https://github.com/matt-shearing/omarchy-nightlight-auto` clones and
+enables the plugin without running `install.sh`, so it is inert: the widget appears and
+its panel shows what setup would change, with a button to agree. Nothing is written until
+you press it. To get the `nightlight-auto` command on your `PATH` as well, run
+`./install.sh --place-only` from the cloned directory.
 
 ## Remove
 
 ```bash
-systemctl --user disable --now nightlight-auto.timer
-rm -f ~/.config/systemd/user/nightlight-auto.{service,timer}
-systemctl --user daemon-reload
-
-rm -f ~/.config/omarchy/hooks/post-boot.d/nightlight-auto.sh
-rm -f ~/.local/bin/nightlight-auto
-rm -rf ~/.config/omarchy/plugins/contra.nightlight
-rm -rf ~/.config/nightlight-auto ~/.local/state/nightlight-auto
-
-# restore Omarchy's stock hyprsunset config, and the stock manual toggle
-omarchy refresh config hypr/hyprsunset.conf
-systemctl --user disable --now hyprsunset.service
+nightlight-auto teardown
 ```
 
-Then drop `contra.nightlight` from `~/.config/omarchy/shell.json` (either the
-`bar.layout` section holding it or the `plugins` array), and if you added the indicator
-mark below, restore the original `NightLight.qml`. If you want hyprsunset back on
-Omarchy's own launch path, add `o.launch_on_start("hyprsunset")` to
-`~/.config/hypr/autostart.lua`.
+That undoes everything setup did: puts your original `hyprsunset.conf` back (or restores
+Omarchy's default if you did not have one), disables and removes the timer and the
+post-boot hook, and hands hyprsunset's launch back the way it found it. Your
+`~/.config/nightlight-auto/config.json` is left alone.
+
+Then remove the files:
+
+```bash
+rm -rf ~/.config/nightlight-auto ~/.local/state/nightlight-auto
+rm -f ~/.local/bin/nightlight-auto
+omarchy plugin remove contra.nightlight
+```
+
+If you added the indicator mark below, restore the original `NightLight.qml`.
 
 ## Use
 
@@ -81,6 +98,8 @@ nightlight-auto show --date 2026-12-21
 nightlight-auto pause          # untinted until you resume
 nightlight-auto resume
 nightlight-auto generate       # rebuild now (the timer does this daily)
+nightlight-auto setup --print  # what setup would change, without changing it
+nightlight-auto teardown       # undo everything setup did
 ```
 
 The bar widget shows the stage of the evening — a sun before the ramp starts, then a
@@ -159,6 +178,20 @@ Run `nightlight-auto generate` after editing. Temperatures are interpolated in *
 ramp to the eye — linear Kelvin steps crowd all the visible change into the warm end.
 
 ## How it fits into Omarchy
+
+### Consent
+
+Every write to your configuration goes through `generate`, and `generate` refuses to run
+until a consent record exists at `~/.local/state/nightlight-auto/consent.json`. Only
+`setup` creates that record, and only after printing the full list of changes and getting
+a `yes`. The bar panel shows that same list — it renders `setup --print` verbatim, so the
+text you agree to is the text that governs what happens.
+
+The record also stores what was true beforehand — whether `hyprsunset.service` was already
+enabled, where the old config was saved — so `teardown` can put things back rather than
+guess. `tests/test_schedule.py` covers this directly: unconsented `generate` refuses,
+`setup` without a terminal refuses, `--print` changes nothing, and setup followed by
+teardown restores the original file byte for byte.
 
 It writes `~/.config/hypr/hyprsunset.conf`, which is Omarchy's documented place for a
 night light schedule. `omarchy toggle nightlight` still works and still wins — until the

@@ -13,6 +13,7 @@ function emptyStatus() {
     running: false,
     paused: false,
     generated: false,
+    setup: false,
     scheduledTemperature: null,
     scheduledSince: "",
     nextTemperature: null,
@@ -41,6 +42,7 @@ function parseStatus(raw) {
     s.running = data.running === true
     s.paused = data.paused === true
     s.generated = data.generated === true
+    s.setup = data.setup === true
     s.scheduledTemperature = normaliseTemp(data.scheduled_temperature)
     s.scheduledSince = String(data.scheduled_since || "")
     s.nextTemperature = normaliseTemp(data.next_temperature)

@@ -21,10 +21,12 @@ Panel {
   readonly property bool busy: service ? service.busy : false
 
   readonly property string stage: service ? service.stage : "day"
+  readonly property bool isSetup: service ? service.isSetup : false
 
   function refresh() { if (root.service) root.service.refresh() }
   function togglePause() { if (root.service) root.service.togglePause() }
   function rebuild() { if (root.service) root.service.rebuild() }
+  function acceptSetup() { if (root.service) root.service.acceptSetup() }
 
   // No IpcHandler here on purpose: Service.qml already claims the
   // "contra.nightlight" target, and two handlers cannot share one. The panel
@@ -65,7 +67,9 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(360))
+    // Wider while onboarding: the disclosure is laid out in columns and wraps
+    // badly if it is squeezed into the width the ladder needs.
+    contentWidth: panel.fittedContentWidth(Style.space(root.isSetup ? 360 : 560))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
 
     PanelKeyCatcher {
@@ -91,8 +95,50 @@ Panel {
 
         PanelSeparator { foreground: root.bar.foreground }
 
+        // Nothing has been written to the user's configuration at this point.
+        // The disclosure below is `nightlight-auto setup --print` verbatim, so
+        // what the button agrees to is exactly what the button then does.
+        Column {
+          visible: !root.isSetup
+          width: parent.width
+          spacing: Style.space(10)
+
+          Text {
+            width: parent.width
+            text: "Not set up yet. Nothing on this machine has been changed."
+            color: root.bar.foreground
+            wrapMode: Text.WordWrap
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            text: root.service && root.service.disclosure !== ""
+                  ? root.service.disclosure
+                  : "Reading what setup would change…"
+            color: root.bar.foreground
+            opacity: 0.75
+            wrapMode: Text.WordWrap
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Button {
+            text: root.busy ? "Setting up…" : "I agree — enable night light"
+            enabled: !root.busy && root.service && root.service.disclosure !== ""
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            onClicked: root.acceptSetup()
+          }
+        }
+
         // What is on the screen right now, and what happens next.
         Column {
+          visible: root.isSetup
           width: parent.width
           spacing: Style.space(4)
 
@@ -159,9 +205,10 @@ Panel {
           }
         }
 
-        PanelSeparator { foreground: root.bar.foreground }
+        PanelSeparator { foreground: root.bar.foreground; visible: root.isSetup }
 
         Column {
+          visible: root.isSetup
           width: parent.width
           spacing: Style.space(2)
 
@@ -196,11 +243,12 @@ Panel {
           }
         }
 
-        PanelSeparator { foreground: root.bar.foreground }
+        PanelSeparator { foreground: root.bar.foreground; visible: root.isSetup }
 
         // Tonight's ladder. Each row carries the tint it will apply, so the
         // ramp is legible as a gradient rather than a column of numbers.
         Column {
+          visible: root.isSetup
           width: parent.width
           spacing: Style.space(2)
 
@@ -255,9 +303,10 @@ Panel {
           }
         }
 
-        PanelSeparator { foreground: root.bar.foreground }
+        PanelSeparator { foreground: root.bar.foreground; visible: root.isSetup }
 
         Row {
+          visible: root.isSetup
           width: parent.width
           spacing: Style.space(8)
 
