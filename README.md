@@ -116,6 +116,27 @@ that keeps the plugin enabled so its service still loads, without placing a widg
 The mark falls back to the stock `omarchy.nightlight` toggle if this plugin is ever
 disabled, so it keeps working either way.
 
+## How this is different
+
+[Set your Nightlight](https://github.com/Darksam08/Set-your-nightlight) is the closest
+listed plugin and covers adjacent ground: it switches between a day and a night
+temperature at manual times or at sunrise/sunset, with an optional transition of up to
+120 minutes, all driven from buttons in the bar.
+
+This one is shaped differently:
+
+- **A ladder, not two states.** The evening keeps deepening in steps across a
+  configurable window (five hours by default) rather than moving between a day value and
+  a night value.
+- **A CLI and a systemd timer**, not only bar buttons — so it is scriptable, bindable to
+  a key, and works over SSH. The bar widget is optional; the schedule runs without it.
+- **Location with nothing to configure.** Coordinates come from the system time zone via
+  tzdata, so travelling and changing time zone moves the ramp with no second step.
+- Steps are interpolated in mireds, and the solar math is covered by tests against
+  published almanac times.
+
+If you want to pick your own on and off times from the bar, theirs is the better fit.
+
 ## Configuration
 
 `~/.config/nightlight-auto/config.json`:
