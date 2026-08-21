@@ -1,0 +1,14 @@
+[Unit]
+Description=Rebuild the night light schedule daily, because sunset moves
+
+[Timer]
+# Overnight, while the ramp is sitting at its floor and a restart is invisible.
+OnCalendar=*-*-* 03:10:00
+# Again in the afternoon, so a time-zone change made during the day is picked
+# up before that evening's ramp starts.
+OnCalendar=*-*-* 14:10:00
+Persistent=true
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

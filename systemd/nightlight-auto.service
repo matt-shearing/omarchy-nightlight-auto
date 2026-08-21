@@ -1,0 +1,8 @@
+[Unit]
+Description=Rebuild the sunset-tracked hyprsunset night light schedule
+Documentation=https://wiki.hyprland.org/Hypr-Ecosystem/hyprsunset/
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nightlight-auto generate
