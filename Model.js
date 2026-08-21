@@ -148,6 +148,23 @@ function summaryLine(status) {
   return now
 }
 
+// Which stage of the evening the ramp is in. Callers map this to a glyph --
+// the names stay here so the indicator mark and the panel cannot disagree
+// about where the boundaries are, while the glyphs live in the QML.
+function rampStage(tinted, fraction) {
+  if (!tinted) return "day"
+  if (fraction < 0.34) return "dusk"
+  if (fraction < 0.75) return "night"
+  return "deep"
+}
+
+function stageLabel(stage) {
+  if (stage === "day") return "Night light off"
+  if (stage === "dusk") return "Warming"
+  if (stage === "night") return "Warm"
+  return "Warmest"
+}
+
 function pluginDirFromUrl(url) {
   var u = String(url || "")
   if (u.indexOf("file://") === 0) u = u.slice(7)

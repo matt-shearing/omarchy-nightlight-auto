@@ -1,5 +1,7 @@
 # Sunset Night Light
 
+![Tonight's ramp](preview.png)
+
 Warm the screen on a ramp anchored to **real local sunset**, deepening through the
 evening, back to untinted at sunrise.
 
@@ -35,8 +37,40 @@ cd omarchy-nightlight-auto
 ./install.sh
 ```
 
-That symlinks the CLI into `~/.local/bin`, installs the bar widget, enables a daily
-timer, adds a post-boot hook, and generates tonight's schedule.
+`install.sh` is idempotent and does six things:
+
+1. symlinks `nightlight-auto` into `~/.local/bin`
+2. links the plugin into `~/.config/omarchy/plugins/contra.nightlight`
+3. enables `hyprsunset.service` (see [below](#hyprsunset-runs-from-systemd-not-autostartlua))
+4. installs and enables `nightlight-auto.timer`, which rebuilds the ramp daily
+5. installs a `post-boot` hook, so a machine that was off overnight still gets tonight's ramp
+6. writes a config file and generates tonight's schedule
+
+It edits only your own config. Nothing under `/usr/share/omarchy` is touched, and your
+existing `hyprsunset.conf` is backed up the first time.
+
+## Remove
+
+```bash
+systemctl --user disable --now nightlight-auto.timer
+rm -f ~/.config/systemd/user/nightlight-auto.{service,timer}
+systemctl --user daemon-reload
+
+rm -f ~/.config/omarchy/hooks/post-boot.d/nightlight-auto.sh
+rm -f ~/.local/bin/nightlight-auto
+rm -rf ~/.config/omarchy/plugins/contra.nightlight
+rm -rf ~/.config/nightlight-auto ~/.local/state/nightlight-auto
+
+# restore Omarchy's stock hyprsunset config, and the stock manual toggle
+omarchy refresh config hypr/hyprsunset.conf
+systemctl --user disable --now hyprsunset.service
+```
+
+Then drop `contra.nightlight` from `~/.config/omarchy/shell.json` (either the
+`bar.layout` section holding it or the `plugins` array), and if you added the indicator
+mark below, restore the original `NightLight.qml`. If you want hyprsunset back on
+Omarchy's own launch path, add `o.launch_on_start("hyprsunset")` to
+`~/.config/hypr/autostart.lua`.
 
 ## Use
 
@@ -49,10 +83,38 @@ nightlight-auto resume
 nightlight-auto generate       # rebuild now (the timer does this daily)
 ```
 
-The bar widget shows a moon while the screen is tinted and a sun when it is not. Click
-it for tonight's ladder with the current step marked, right-click to pause. It turns the
-urgent colour only when hyprsunset is not running, because that is the one state where
-nothing is being applied at all.
+The bar widget shows the stage of the evening — a sun before the ramp starts, then a
+setting sun, a crescent moon, and a new moon once it reaches the floor. Click it for
+tonight's ladder with the current step marked, right-click to pause. It turns the urgent
+colour only when hyprsunset is not running, because that is the one state where nothing
+is being applied at all.
+
+From a script or a keybinding:
+
+```bash
+omarchy-shell contra.nightlight status
+omarchy-shell contra.nightlight pause | resume | toggle | rebuild
+omarchy-shell shell toggle contra.nightlight    # open the panel
+```
+
+### Using the indicator instead of a bar widget
+
+If you would rather not have a second night light icon, `indicators/NightLight.qml`
+replaces the stock mark in the centre-bar indicator cluster with one that follows the
+ramp. Clone the indicators widget, drop the file in, and leave this plugin out of the bar:
+
+```bash
+omarchy plugin clone omarchy.indicators
+cp indicators/NightLight.qml ~/.config/omarchy/plugins/<you>.indicators/indicators/
+omarchy restart shell
+```
+
+Then in `~/.config/omarchy/shell.json`, remove the `contra.nightlight` entry from
+`bar.layout` and add `{ "id": "contra.nightlight" }` to the top-level `plugins` array —
+that keeps the plugin enabled so its service still loads, without placing a widget.
+
+The mark falls back to the stock `omarchy.nightlight` toggle if this plugin is ever
+disabled, so it keeps working either way.
 
 ## Configuration
 
@@ -78,14 +140,19 @@ ramp to the eye — linear Kelvin steps crowd all the visible change into the wa
 ## How it fits into Omarchy
 
 It writes `~/.config/hypr/hyprsunset.conf`, which is Omarchy's documented place for a
-night light schedule, and touches nothing under `/usr/share/omarchy`. Your existing file
-is backed up the first time. `omarchy toggle nightlight` still works and still wins —
-until the next step in the ladder fires, at most `step_minutes` later. For a hold that
-lasts, use `nightlight-auto pause`.
+night light schedule. `omarchy toggle nightlight` still works and still wins — until the
+next step in the ladder fires, at most `step_minutes` later. For a hold that lasts, use
+`nightlight-auto pause`.
+
+All state lives in a single `service` plugin. Bar widgets are instantiated once per
+monitor and an indicator mark is instantiated twice over — active strip and hover
+fold-out — so anything holding its own copy of the state would drift, and clicking one
+copy would leave the others stale. The QML here is read-only; every side effect goes
+through the one singleton.
 
 ### hyprsunset runs from systemd, not autostart.lua
 
-The manual suggests `o.launch_on_start("hyprsunset")`. This uses
+The Omarchy manual suggests `o.launch_on_start("hyprsunset")`. This uses
 `systemctl --user enable hyprsunset.service` instead — the unit the hyprsunset package
 already ships — for a specific reason.
 
@@ -96,8 +163,9 @@ that service.** Run from the timer, hyprsunset comes up, answers on its socket, 
 then killed the instant the oneshot exits — reproducibly, even after waiting for it to
 confirm it is up. Restarting the unit has no such problem.
 
-Running both launch paths would just race for hyprsunset's socket, so there is only the
-one. `~/.config/hypr/autostart.lua` carries a comment saying so.
+Running both launch paths would race for hyprsunset's socket, so there is only the one.
+`install.sh` leaves the systemd unit enabled; if you also have the `autostart.lua` line,
+remove it.
 
 ## Tests
 
@@ -111,9 +179,10 @@ clamping and mired spacing; and the rendered config's structure.
 
 ## Requirements
 
-Omarchy 4, `hyprsunset`, Python 3.9+. No other dependencies — the solar calculation is
-stdlib arithmetic.
+Omarchy 4 (Quattro), `hyprsunset`, Python 3.9 or newer. No external Python packages and
+no other dependencies — the solar calculation is stdlib arithmetic. `jq` and `systemd`
+come with Omarchy.
 
 ## Licence
 
-MIT.
+MIT — see [LICENSE](LICENSE).

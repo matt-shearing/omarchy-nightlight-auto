@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "id": "contra.nightlight",
   "name": "Sunset Night Light",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "contra",
   "license": "MIT",
-  "description": "Warms the screen on a ramp anchored to real local sunset, not a fixed clock time. Regenerates hyprsunset's schedule daily as sunset moves.",
+  "description": "Warms the screen on a ramp anchored to real local sunset, deepening through the evening. Rebuilds hyprsunset's schedule daily as sunset moves.",
   "kinds": [
+    "service",
     "bar-widget"
   ],
   "entryPoints": {
+    "service": "Service.qml",
     "barWidget": "Panel.qml"
   },
   "barWidget": {

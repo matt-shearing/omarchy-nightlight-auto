@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -14,82 +13,28 @@ Panel {
   ipcTarget: "contra.nightlight"
   manageIpc: false
 
-  property var status: Model.emptyStatus()
-  property var steps: []
-  property bool busy: false
+  // One singleton owns the state; this widget is instantiated once per monitor
+  // and only reads from it. See Service.qml.
+  readonly property var service: bar?.shell?.serviceFor("contra.nightlight")
+  readonly property var status: service ? service.status : Model.emptyStatus()
+  readonly property var steps: service ? service.steps : []
+  readonly property bool busy: service ? service.busy : false
 
-  readonly property string pluginDir: Model.pluginDirFromUrl(Qt.resolvedUrl("."))
-  // Absolute path on purpose: the shell's PATH starts with $OMARCHY_PATH/bin,
-  // so a bare name would never reach a user-installed helper.
-  readonly property string cli: root.pluginDir + "/bin/nightlight-auto"
+  readonly property string stage: service ? service.stage : "day"
 
-  readonly property bool warm: root.status.ok && !root.status.paused
-                               && root.status.scheduledTemperature !== null
+  function refresh() { if (root.service) root.service.refresh() }
+  function togglePause() { if (root.service) root.service.togglePause() }
+  function rebuild() { if (root.service) root.service.rebuild() }
 
-  function refresh() {
-    if (!statusProc.running) statusProc.running = true
-    if (root.opened && !stepsProc.running) stepsProc.running = true
-  }
-
-  function run(args) {
-    if (actionProc.running) return
-    root.busy = true
-    actionProc.command = [root.cli].concat(args)
-    actionProc.running = true
-  }
-
-  function togglePause() { run(["toggle"]) }
-  function rebuild() { run(["generate", "--force"]) }
-
-  IpcHandler {
-    target: "contra.nightlight"
-    function open() { root.open() }
-    function close() { root.close() }
-    function toggle() { root.toggle() }
-    function pause() { root.run(["pause"]) }
-    function resume() { root.run(["resume"]) }
-    function rebuild() { root.rebuild() }
-  }
+  // No IpcHandler here on purpose: Service.qml already claims the
+  // "contra.nightlight" target, and two handlers cannot share one. The panel
+  // is summoned the standard way, with `omarchy-shell shell toggle
+  // contra.nightlight`.
 
   onOpenedChanged: if (opened) refresh()
 
-  Process {
-    id: statusProc
-    command: [root.cli, "status", "--json"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.status = Model.parseStatus(text)
-    }
-  }
-
-  Process {
-    id: stepsProc
-    command: [root.cli, "show", "--json"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(String(text || "").trim())
-          root.steps = (data && data.steps) ? data.steps : []
-        } catch (e) {
-          root.steps = []
-        }
-      }
-    }
-  }
-
-  Process {
-    id: actionProc
-    onExited: {
-      root.busy = false
-      Qt.callLater(function() { root.refresh() })
-    }
-  }
-
-  // A restart of hyprsunset takes a moment to settle, so poll a little faster
-  // while the panel is open than while it is just sitting in the bar.
-  Timer { interval: 30000; running: true; repeat: true; onTriggered: root.refresh() }
-  Timer { interval: 2000; running: root.opened; repeat: true; onTriggered: root.refresh() }
+  // The service polls on its own; refresh faster only while the panel is open.
+  Timer { interval: 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
 
   Component.onCompleted: refresh()
 
@@ -100,7 +45,9 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.warm ? "󰖔" : "󰖙"
+    text: root.stage === "day" ? "󰖙"
+          : root.stage === "dusk" ? "󰖜"
+          : root.stage === "night" ? "󰖔" : "󰽤"
     // Urgent colour is for a fault, not for the normal warm evening: the only
     // real fault here is hyprsunset being down, when nothing is applied at all.
     active: root.status.ok && !root.status.running
