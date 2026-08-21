@@ -132,6 +132,11 @@ Then in `~/.config/omarchy/shell.json`, remove the `contra.nightlight` entry fro
 `bar.layout` and add `{ "id": "contra.nightlight" }` to the top-level `plugins` array —
 that keeps the plugin enabled so its service still loads, without placing a widget.
 
+Clicking pauses, clicking again resumes. The mark stays on screen while paused — an
+inactive indicator is given `opacity: 0` and `interactive: false`, so a mark that hid
+itself on pause would take the only control for undoing that with it. Paused is worth
+seeing in daylight too: it says tonight's ramp will not run.
+
 The mark falls back to the stock `omarchy.nightlight` toggle if this plugin is ever
 disabled, so it keeps working either way.
 

@@ -8,7 +8,7 @@ import qs.Ui
 // it is on.
 //
 // The glyph tracks how deep the sunset ramp has got: sun before it starts,
-// then setting sun, moon, and waning crescent at the floor.
+// then setting sun, moon, and a new moon at the floor.
 BarIndicator {
   id: root
 
@@ -20,27 +20,35 @@ BarIndicator {
   readonly property string stage: sunset ? sunset.stage : "day"
   readonly property bool paused: sunset ? sunset.paused : false
 
-  active: sunset ? sunset.tinted : (builtin ? builtin.enabled : false)
+  // Paused counts as active so the mark stays on screen. An inactive indicator
+  // gets opacity 0 and interactive false, so binding this to "is the screen
+  // tinted" meant one click hid the only control for undoing that click.
+  // Paused is also worth seeing in daylight: it says tonight's ramp will not run.
+  active: sunset ? (sunset.tinted || sunset.paused)
+                 : (builtin ? builtin.enabled : false)
 
-  activeText: stage === "dusk" ? "󰖜" : stage === "night" ? "󰖔" : "󰽤"
+  activeText: paused ? "󰖙"
+              : stage === "dusk" ? "󰖜"
+              : stage === "night" ? "󰖔" : "󰽤"
   inactiveText: "󰖙"
 
   activeTooltipText: {
     if (!root.sunset) return "Day Light"
+    if (root.paused) return "Night light paused - click to resume"
     var t = root.sunset.temperature
     var now = (t === null ? "off" : t + "K")
-    return root.sunset.stageLabel + " · " + now + " — click to pause"
+    return root.sunset.stageLabel + " \u00b7 " + now + " - click to pause"
   }
 
   inactiveTooltipText: {
     if (!root.sunset) return "Night Light"
-    if (root.paused) return "Night light paused — click to resume"
+    if (!root.sunset.isSetup) return "Sunset Night Light - run: nightlight-auto setup"
     if (!root.sunset.running) return "hyprsunset is not running"
     return "Night light starts at sunset (" + root.sunset.status.sunset + ")"
   }
 
   onPressed: function() {
-    if (root.sunset) root.sunset.togglePause()
+    if (root.sunset && root.sunset.isSetup) root.sunset.togglePause()
     else if (root.builtin) root.builtin.setNightlight(!root.active)
   }
 }
