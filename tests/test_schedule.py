@@ -125,12 +125,73 @@ def test_ladder_ramps_down_to_the_night_temperature():
     assert temps == sorted(temps, reverse=True), "ramp must never warm back up"
 
 
-def test_ladder_starts_at_sunset_and_ends_untinted_at_sunrise():
+def test_ladder_starts_at_dusk_not_sunset():
+    # Sunset is still daylight. Anything visible then reads as the filter
+    # firing too early, which is the whole reason for the anchor.
     (steps, info), s = build()
     assert steps[0][0] == info["ramp_start"]
-    assert info["ramp_start"] == info["sunset"]  # default offset is zero
+    assert info["anchor_name"] == "civil_dusk"
+    assert info["ramp_start"] == info["anchor"]  # default offset is zero
+    gap = (info["anchor"] - info["sunset"]).total_seconds() / 60
+    assert 15 <= gap <= 45, f"civil dusk should trail sunset, got {gap} min"
     assert steps[-1][1] is None, "last profile should be the untinted day"
     assert steps[-1][0] == info["day_start"]
+
+
+def test_anchor_choice_moves_the_start_later():
+    starts = {}
+    for anchor in ("sunset", "civil_dusk", "nautical_dusk", "astronomical_dusk"):
+        (_, info), _ = build(ramp_anchor=anchor)
+        starts[anchor] = info["ramp_start"]
+    ordered = [starts["sunset"], starts["civil_dusk"],
+               starts["nautical_dusk"], starts["astronomical_dusk"]]
+    assert ordered == sorted(ordered), f"anchors out of order: {starts}"
+
+
+def test_ramp_begins_at_the_daytime_value_so_there_is_no_step():
+    # The original bug: the first rung was 5000K, so sunset brought a visible
+    # jump from untinted straight to orange.
+    (steps, _), s = build()
+    assert steps[0][1] == s["evening_temp"] == 6500
+    # a jump of more than ~10 mireds at the start is perceptible
+    jump = 1e6 / steps[0][1] - 1e6 / 6500
+    assert abs(jump) < 10
+
+
+def test_curve_holds_near_the_daytime_value_early():
+    # Half an hour in, nothing should have visibly happened yet.
+    (steps, info), s = build()
+    thirty_min = info["ramp_start"] + timedelta(minutes=30)
+    early = [temp for when, temp in steps
+             if temp is not None and when <= thirty_min][-1]
+    assert early >= 6300, f"too warm too early: {early}K"
+    # and by the end it must still reach the floor
+    assert [t for _, t in steps if t is not None][-1] == s["night_temp"]
+
+
+def test_curve_is_monotonic_for_any_power():
+    for power in (1.0, 1.5, 2.0, 3.0):
+        (steps, _), _ = build(ramp_curve_power=power)
+        temps = [t for _, t in steps if t is not None]
+        assert temps == sorted(temps, reverse=True), f"power {power} not monotonic"
+
+
+def test_unreachable_twilight_falls_back_to_sunset():
+    # Reykjavik in June: the sun never gets 18 degrees down.
+    tz = ZoneInfo("Atlantic/Reykjavik")
+    _, info = nl.build_schedule(settings(ramp_anchor="astronomical_dusk"),
+                                date(2026, 6, 21), 64.1466, -21.9426, tz)
+    assert info["anchor_name"] == "sunset"
+
+
+def test_bad_anchor_and_curve_are_rejected():
+    for bad in (dict(ramp_anchor="dinnertime"), dict(ramp_curve_power=0),
+                dict(ramp_curve_power=50)):
+        try:
+            nl.validate(settings(**bad))
+        except SystemExit:
+            continue
+        raise AssertionError(f"validate accepted {bad}")
 
 
 def test_no_duplicate_clock_times():
@@ -165,8 +226,10 @@ def test_sorted_by_clock_the_cycle_stays_consistent():
 
 def test_interpolation_is_even_in_mireds():
     # Even steps in mired space are what make the ramp read as smooth. Disable
-    # the 50 K output rounding first, or quantisation noise swamps the check.
-    (steps, _), _ = build(step_minutes=60, ramp_minutes=300, round_to_kelvin=1)
+    # the 50 K output rounding first, or quantisation noise swamps the check,
+    # and flatten the curve, which deliberately makes the steps uneven in time.
+    (steps, _), _ = build(step_minutes=60, ramp_minutes=300, round_to_kelvin=1,
+                          ramp_curve_power=1.0)
     mireds = [1e6 / t for _, t in steps if t is not None]
     gaps = [b - a for a, b in zip(mireds, mireds[1:])]
     assert max(gaps) - min(gaps) < 0.5, f"mired steps are uneven: {gaps}"

@@ -2,8 +2,8 @@
 
 ![Tonight's ramp](preview.png)
 
-Warm the screen on a ramp anchored to **real local sunset**, deepening through the
-evening, back to untinted at sunrise.
+Warm the screen on a ramp anchored to **real local dusk**, deepening through the evening,
+back to untinted at sunrise.
 
 Omarchy's built-in night light is a switch: `Super + Ctrl + N` flips between 4000 K and
 6500 K. hyprsunset can also follow the clock, but only the clock — its profiles key on a
@@ -12,13 +12,19 @@ gradually warmer means a ladder of profiles, and a ladder anchored to sunset has
 rebuilt as sunset moves. That is what this does.
 
 ```
-17:30  5000K     sunset
-17:50  4800K
-18:10  4600K
-   …
-22:30  3000K     five hours later, at the floor
-06:13  untinted  sunrise
+17:30            sunset — still light out, so nothing happens
+17:54  6500K     civil dusk: the ramp starts at the daytime value
+18:22  6450K     nautical dusk, properly dark now — still imperceptible
+19:14  6000K     the first hint of warmth
+20:34  4900K
+22:54  3000K     five hours in, at the floor
+06:12  untinted  sunrise
 ```
+
+It starts at **dusk rather than sunset**, from the daytime temperature rather than a
+warmer one, and on a curve that holds near neutral early. Sunset is still daylight; a
+filter that becomes visible then just reads as firing too early. Nothing here steps — the
+first rung is the value already on screen.
 
 ## Location comes from your time zone
 
@@ -168,19 +174,32 @@ If you want to pick your own on and off times from the bar, theirs is the better
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `latitude`, `longitude` | `null` | `null` derives both from the system time zone |
-| `evening_temp` | `5000` | Kelvin at the start of the ramp |
+| `evening_temp` | `6500` | Kelvin at the start of the ramp. The daytime value, so it begins from no tint |
 | `night_temp` | `3000` | Kelvin at the deepest point |
 | `day_temp` | `null` | `null` means untinted; a number tints the day too |
-| `ramp_start_offset_min` | `0` | Minutes relative to sunset; negative starts earlier |
+| `ramp_anchor` | `civil_dusk` | `sunset`, `civil_dusk`, `nautical_dusk` or `astronomical_dusk` |
+| `ramp_start_offset_min` | `0` | Minutes relative to the anchor; negative starts earlier |
 | `ramp_minutes` | `300` | How long the ramp takes to reach `night_temp` |
 | `step_minutes` | `20` | Ladder granularity |
+| `ramp_curve_power` | `2.0` | `1.0` is a straight line; higher holds near daylight longer |
 | `morning_offset_min` | `0` | Minutes relative to sunrise for the return to day |
 | `fallback_sunset`, `fallback_sunrise` | `18:00`, `06:00` | Used only where the sun does not rise or set |
 | `round_to_kelvin` | `50` | Rounds emitted temperatures, to keep the file readable |
 
-Run `nightlight-auto generate` after editing. Temperatures are interpolated in **mireds**
-(reciprocal megakelvin), not Kelvin, because even steps there are what read as an even
-ramp to the eye — linear Kelvin steps crowd all the visible change into the warm end.
+Run `nightlight-auto generate` after editing, and `nightlight-auto show` to see the result
+before committing to it.
+
+Two things shape how the ramp feels. Temperatures are interpolated in **mireds**
+(reciprocal megakelvin) rather than Kelvin, because even steps there are what read as an
+even ramp to the eye — linear Kelvin steps crowd all the visible change into the warm end.
+On top of that, `ramp_curve_power` biases the movement towards later in the evening, so
+the first hour does very little. Set it to `1.0` for a straight line.
+
+**Anchors.** Sunset is when the sun's disc goes down and it is still light. Civil dusk
+(sun 6° below) is about when you would reach for a lamp; by nautical dusk (12°) it is
+properly dark. In Brisbane those fall roughly 24 and 52 minutes after sunset, and the gap
+widens the further you are from the equator. Where the sun never reaches the chosen
+altitude — a high-latitude summer — it falls back to sunset.
 
 ## How it fits into Omarchy
 
