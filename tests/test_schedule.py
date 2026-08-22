@@ -111,7 +111,7 @@ def test_zone_with_several_names_still_resolves():
 # ------------------------------------------------------------------ ladder
 
 
-def build(day=date(2026, 8, 21), tz_name="Australia/Brisbane", **overrides):
+def build(day=date(2026, 8, 22), tz_name="Australia/Brisbane", **overrides):
     tz = ZoneInfo(tz_name)
     s = settings(**overrides)
     return nl.build_schedule(s, day, -27.4667, 153.0333, tz), s
@@ -205,7 +205,7 @@ def test_no_duplicate_clock_times():
 def test_ramp_never_runs_past_the_morning_profile():
     # A ramp longer than the night must be clamped, or the ladder would emit a
     # warm profile after the untinted one and hold the tint through the day.
-    (steps, info), _ = build(ramp_minutes=2000)
+    (steps, info), _ = build(ramp_minutes=2000, full_tint_by=None)
     assert info["ramp_end"] < info["day_start"]
     for when, temp in steps:
         if temp is None:
@@ -229,19 +229,75 @@ def test_interpolation_is_even_in_mireds():
     # the 50 K output rounding first, or quantisation noise swamps the check,
     # and flatten the curve, which deliberately makes the steps uneven in time.
     (steps, _), _ = build(step_minutes=60, ramp_minutes=300, round_to_kelvin=1,
-                          ramp_curve_power=1.0)
+                          ramp_curve_power=1.0, full_tint_by=None)
     mireds = [1e6 / t for _, t in steps if t is not None]
     gaps = [b - a for a, b in zip(mireds, mireds[1:])]
     assert max(gaps) - min(gaps) < 0.5, f"mired steps are uneven: {gaps}"
 
 
 def test_rounding_stays_within_half_a_quantum():
-    (rounded, _), s = build(step_minutes=60, ramp_minutes=300)
-    (exact, _), _ = build(step_minutes=60, ramp_minutes=300, round_to_kelvin=1)
+    (rounded, _), s = build(step_minutes=60, ramp_minutes=300, full_tint_by=None)
+    (exact, _), _ = build(step_minutes=60, ramp_minutes=300, round_to_kelvin=1,
+                          full_tint_by=None)
     for (_, got), (_, want) in zip(rounded, exact):
         if got is None or want is None:
             continue
         assert abs(got - want) <= s["round_to_kelvin"] / 2 + 1
+
+
+def test_ramp_ends_at_the_target_clock_time():
+    (steps, info), s = build()
+    assert info["ramp_end"].strftime("%H:%M") == s["full_tint_by"] == "21:00"
+    warm = [(w, temp) for w, temp in steps if temp is not None]
+    assert warm[-1][1] == s["night_temp"]
+    assert warm[-1][0].strftime("%H:%M") == "21:00"
+
+
+def test_ramp_length_follows_the_season():
+    # The point of a clock target: dusk moves by over an hour across the year
+    # here, so a fixed duration would land full tint near midnight in summer.
+    lengths = {}
+    for day in (date(2026, 6, 21), date(2026, 12, 21)):
+        (_, info), _ = build(day=day)
+        lengths[day] = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+        assert info["ramp_end"].strftime("%H:%M") == "21:00", day
+    midwinter, midsummer = lengths[date(2026, 6, 21)], lengths[date(2026, 12, 21)]
+    assert midwinter > midsummer + 60, (
+        f"ramp should stretch in winter: {midwinter} vs {midsummer} min")
+
+
+def test_null_target_falls_back_to_a_fixed_duration():
+    (_, info), _ = build(full_tint_by=None, ramp_minutes=120)
+    length = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+    assert length == 120
+
+
+def test_an_early_hours_target_means_the_next_day():
+    (_, info), _ = build(full_tint_by="01:00")
+    assert info["ramp_end"].strftime("%H:%M") == "01:00"
+    assert info["ramp_end"] > info["ramp_start"]
+    assert info["ramp_end"].date() == info["ramp_start"].date() + timedelta(days=1)
+
+
+def test_a_target_already_past_at_dusk_keeps_a_short_ramp():
+    # Asking to be fully warm at 17:00 when it gets dark at 17:54 is impossible;
+    # it must not invert the ramp or produce a zero-length one.
+    (steps, info), s = build(full_tint_by="17:00")
+    length = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+    assert length == s["min_ramp_minutes"]
+    assert info["ramp_end"] > info["ramp_start"]
+    temps = [temp for _, temp in steps if temp is not None]
+    assert temps == sorted(temps, reverse=True)
+
+
+def test_target_is_validated():
+    for bad in (dict(full_tint_by="25:00"), dict(full_tint_by="nine"),
+                dict(min_ramp_minutes=0)):
+        try:
+            nl.validate(settings(**bad))
+        except SystemExit:
+            continue
+        raise AssertionError(f"validate accepted {bad}")
 
 
 def test_degenerate_location_falls_back_and_is_flagged():

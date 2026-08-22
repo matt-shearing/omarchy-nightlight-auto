@@ -60,9 +60,16 @@ DEFAULTS = {
     # "nautical_dusk" or "astronomical_dusk". Sunset is still daylight; civil
     # dusk is about when you reach for a lamp.
     "ramp_anchor": "civil_dusk",
+    # The clock time by which the screen should be fully warm. The ramp runs
+    # from the anchor to here, so its length follows the season instead of
+    # being fixed: dusk moves by well over an hour across the year, and a fixed
+    # duration would land full tint near midnight in summer. Set it to null to
+    # use ramp_minutes instead.
+    "full_tint_by": "21:00",
     # Ramp geometry, in minutes.
     "ramp_start_offset_min": 0,   # relative to the anchor; negative starts earlier
-    "ramp_minutes": 300,          # anchor -> night_temp over five hours
+    "ramp_minutes": 300,          # only used when full_tint_by is null
+    "min_ramp_minutes": 45,       # floor, for when dusk falls close to the target
     "step_minutes": 20,           # granularity of the ladder
     # Shape of the ramp. 1.0 is a straight line in mireds; higher values hold
     # near the daytime value for longer and do most of the warming later, so
@@ -112,6 +119,14 @@ def validate(s: dict) -> None:
     if not (0.1 <= s["ramp_curve_power"] <= 10):
         die(f"ramp_curve_power must be between 0.1 and 10 "
             f"(got {s['ramp_curve_power']})")
+    if s["full_tint_by"] is not None:
+        try:
+            hh, mm = (int(part) for part in s["full_tint_by"].split(":"))
+            assert 0 <= hh < 24 and 0 <= mm < 60
+        except (ValueError, AssertionError, AttributeError):
+            die(f"full_tint_by must be HH:MM or null (got {s['full_tint_by']!r})")
+    if s["min_ramp_minutes"] < 1:
+        die("min_ramp_minutes must be at least 1")
     for key in ("fallback_sunset", "fallback_sunrise"):
         try:
             hh, mm = (int(part) for part in s[key].split(":"))
@@ -322,7 +337,7 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
     day_start = sunrise_next + timedelta(minutes=settings["morning_offset_min"])
 
     step = timedelta(minutes=settings["step_minutes"])
-    ramp = timedelta(minutes=settings["ramp_minutes"])
+    ramp = _ramp_length(settings, ramp_start, tz)
 
     # Never let the ramp run into the morning profile.
     latest_end = day_start - step
@@ -357,6 +372,33 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
         "ramp_start": ramp_start, "ramp_end": ramp_end, "day_start": day_start,
         "anchor": anchor, "anchor_name": anchor_name,
     }
+
+
+def _ramp_length(settings, ramp_start: datetime, tz: ZoneInfo) -> timedelta:
+    """How long the ramp runs for.
+
+    With full_tint_by set, the ramp ends at that clock time, so its length
+    tracks the season: it stretches through winter when dusk is early and
+    compresses in summer when dusk is late, always reaching the floor at the
+    same hour. That is usually what someone means by "warm by nine" -- the hour
+    is about their evening, not about the sun.
+    """
+    target = settings["full_tint_by"]
+    minimum = timedelta(minutes=settings["min_ramp_minutes"])
+    if target is None:
+        return timedelta(minutes=settings["ramp_minutes"])
+
+    hh, mm = (int(part) for part in target.split(":"))
+    end = ramp_start.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if end <= ramp_start:
+        # An early-hours target means tomorrow; anything else is a target that
+        # has already passed by the time it gets dark, so keep a short ramp
+        # rather than inverting it.
+        if hh < 12:
+            end += timedelta(days=1)
+        else:
+            return minimum
+    return max(end - ramp_start, minimum)
 
 
 def _finish(steps, day_start, settings):
@@ -408,8 +450,9 @@ def render_conf(steps, settings, info, lat, lon, source, tz_name) -> str:
         f"   sunrise: {info['sunrise'].strftime('%H:%M')}"
         + ("   (estimated: the sun did not set)" if info["degenerate"] else ""),
         f"# ramp      : {settings['evening_temp']}K -> {settings['night_temp']}K"
-        f" over {settings['ramp_minutes']} min"
-        f" (curve {settings['ramp_curve_power']})",
+        f" by {info['ramp_end'].strftime('%H:%M')}"
+        f" ({int((info['ramp_end'] - info['ramp_start']).total_seconds() // 60)} min,"
+        f" curve {settings['ramp_curve_power']})",
         "",
     ]
     # hyprsunset treats the profile list as a 24h cycle and wraps past the last

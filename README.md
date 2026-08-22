@@ -14,17 +14,24 @@ rebuilt as sunset moves. That is what this does.
 ```
 17:30            sunset — still light out, so nothing happens
 17:54  6500K     civil dusk: the ramp starts at the daytime value
-18:22  6450K     nautical dusk, properly dark now — still imperceptible
-19:14  6000K     the first hint of warmth
-20:34  4900K
-22:54  3000K     five hours in, at the floor
+18:22  6400K     nautical dusk, properly dark now — still imperceptible
+18:56  5750K     the first real warmth
+19:58  4300K
+21:00  3000K     fully warm, at the hour you asked for
 06:12  untinted  sunrise
 ```
 
 It starts at **dusk rather than sunset**, from the daytime temperature rather than a
 warmer one, and on a curve that holds near neutral early. Sunset is still daylight; a
-filter that becomes visible then just reads as firing too early. Nothing here steps — the
-first rung is the value already on screen.
+filter that becomes visible then reads as firing too early. Nothing here steps — the first
+rung is the value already on screen.
+
+It finishes at **a clock time you choose**, not after a fixed number of hours. Dusk moves
+by well over an hour across the year, so a fixed duration drifts full tint towards
+midnight in summer. Pinning the end instead means the ramp stretches through winter and
+compresses in summer, and is always fully warm when you want to be winding down. In
+Brisbane, `full_tint_by: "21:00"` gives a 212-minute ramp in midwinter and 111 in
+midsummer.
 
 ## Location comes from your time zone
 
@@ -178,8 +185,10 @@ If you want to pick your own on and off times from the bar, theirs is the better
 | `night_temp` | `3000` | Kelvin at the deepest point |
 | `day_temp` | `null` | `null` means untinted; a number tints the day too |
 | `ramp_anchor` | `civil_dusk` | `sunset`, `civil_dusk`, `nautical_dusk` or `astronomical_dusk` |
+| `full_tint_by` | `"21:00"` | Clock time to reach `night_temp`. `null` uses `ramp_minutes` instead |
 | `ramp_start_offset_min` | `0` | Minutes relative to the anchor; negative starts earlier |
-| `ramp_minutes` | `300` | How long the ramp takes to reach `night_temp` |
+| `ramp_minutes` | `300` | Fixed ramp length, used only when `full_tint_by` is `null` |
+| `min_ramp_minutes` | `45` | Floor, for when dusk falls close to the target |
 | `step_minutes` | `20` | Ladder granularity |
 | `ramp_curve_power` | `2.0` | `1.0` is a straight line; higher holds near daylight longer |
 | `morning_offset_min` | `0` | Minutes relative to sunrise for the return to day |
@@ -194,6 +203,10 @@ Two things shape how the ramp feels. Temperatures are interpolated in **mireds**
 even ramp to the eye — linear Kelvin steps crowd all the visible change into the warm end.
 On top of that, `ramp_curve_power` biases the movement towards later in the evening, so
 the first hour does very little. Set it to `1.0` for a straight line.
+
+An early-hours `full_tint_by` such as `"01:00"` is taken as the following morning. A time
+that has already passed by the time it gets dark keeps a short ramp rather than inverting
+it.
 
 **Anchors.** Sunset is when the sun's disc goes down and it is still light. Civil dusk
 (sun 6° below) is about when you would reach for a lamp; by nautical dusk (12°) it is
