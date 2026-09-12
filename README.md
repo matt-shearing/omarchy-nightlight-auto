@@ -241,6 +241,21 @@ fold-out — so anything holding its own copy of the state would drift, and clic
 copy would leave the others stale. The QML here is read-only; every side effect goes
 through the one singleton.
 
+### Replacement bars
+
+Omarchy 4.0.3 scopes live service objects to the trusted built-in bar; a
+replacement/third-party bar's facade cannot resolve them, so
+`bar.shell.serviceFor("contra.nightlight")` returns nothing there. When that happens the
+bar widget hosts a `Client` of its own, which runs the exact same `nightlight-auto`
+reads (`status --json`, `show --json`) and writes (`pause`, `resume`, `toggle`,
+`generate --force`) against the same files the service would use — nothing is computed
+in QML, so what the widget shows is still what is actually loaded.
+
+Each widget copy under a replacement bar owns one such client; the built-in bar keeps
+the single shared service, unchanged. Copies converge on the same files on the same
+60-second cadence, and refresh immediately while their panel is open, so a click on one
+copy re-reads for all. Bars that do expose a working `serviceFor` are used as-is.
+
 ### hyprsunset runs from systemd, not autostart.lua
 
 The Omarchy manual suggests `o.launch_on_start("hyprsunset")`. This uses
