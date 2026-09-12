@@ -13,20 +13,42 @@ Panel {
   ipcTarget: "contra.nightlight"
   manageIpc: false
 
-  // One singleton owns the state; this widget is instantiated once per monitor
-  // and only reads from it. See Service.qml.
-  readonly property var service: bar?.shell?.serviceFor("contra.nightlight")
-  readonly property var status: service ? service.status : Model.emptyStatus()
-  readonly property var steps: service ? service.steps : []
-  readonly property bool busy: service ? service.busy : false
+  // The state owner. Under the built-in bar this resolves to the shell-hosted
+  // service singleton, shared by every monitor. A replacement/third-party bar's
+  // facade cannot resolve live service objects (Omarchy 4.0.3 scopes them to
+  // the trusted built-in bar), so serviceFor is null there and each widget copy
+  // owns a Client of its own, running the same CLI reads/writes against the
+  // same files. See Client.qml.
+  //
+  // The guard deliberately checks the method exists rather than calling through
+  // optional chaining: a foreign bar may attach its own shell that has no
+  // `serviceFor` at all, and calling a missing member would kill the widget.
+  Component { id: clientComp; Client {} }
+  property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
+      ? bar.shell.serviceFor("contra.nightlight") : null
+  property var localClient: null
+  readonly property var svc: root.service || root.localClient
 
-  readonly property string stage: service ? service.stage : "day"
-  readonly property bool isSetup: service ? service.isSetup : false
+  // Created lazily, and only when there is no shared service: the built-in bar
+  // keeps the one singleton (no extra processes), while a replacement bar gets
+  // one client per widget copy as needed.
+  function ensureClient() {
+    if (!root.localClient && !root.service) root.localClient = clientComp.createObject(root)
+  }
+  onServiceChanged: ensureClient()
+  Component.onCompleted: { ensureClient(); refresh() }
 
-  function refresh() { if (root.service) root.service.refresh() }
-  function togglePause() { if (root.service) root.service.togglePause() }
-  function rebuild() { if (root.service) root.service.rebuild() }
-  function acceptSetup() { if (root.service) root.service.acceptSetup() }
+  readonly property var status: svc ? svc.status : Model.emptyStatus()
+  readonly property var steps: svc ? svc.steps : []
+  readonly property bool busy: svc ? svc.busy : false
+
+  readonly property string stage: svc ? svc.stage : "day"
+  readonly property bool isSetup: svc ? svc.isSetup : false
+
+  function refresh() { if (root.svc) root.svc.refresh() }
+  function togglePause() { if (root.svc) root.svc.togglePause() }
+  function rebuild() { if (root.svc) root.svc.rebuild() }
+  function acceptSetup() { if (root.svc) root.svc.acceptSetup() }
 
   // No IpcHandler here on purpose: Service.qml already claims the
   // "contra.nightlight" target, and two handlers cannot share one. The panel
@@ -37,8 +59,6 @@ Panel {
 
   // The service polls on its own; refresh faster only while the panel is open.
   Timer { interval: 5000; running: root.opened; repeat: true; onTriggered: root.refresh() }
-
-  Component.onCompleted: refresh()
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -115,8 +135,8 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.service && root.service.disclosure !== ""
-                  ? root.service.disclosure
+            text: root.svc && root.svc.disclosure !== ""
+                  ? root.svc.disclosure
                   : "Reading what setup would change…"
             color: root.bar.foreground
             opacity: 0.75
@@ -127,7 +147,7 @@ Panel {
 
           Button {
             text: root.busy ? "Setting up…" : "I agree — enable night light"
-            enabled: !root.busy && root.service && root.service.disclosure !== ""
+            enabled: !root.busy && root.svc && root.svc.disclosure !== ""
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
             fontSize: Style.font.bodySmall
