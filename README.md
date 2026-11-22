@@ -150,8 +150,12 @@ inactive indicator is given `opacity: 0` and `interactive: false`, so a mark tha
 itself on pause would take the only control for undoing that with it. Paused is worth
 seeing in daylight too: it says tonight's ramp will not run.
 
-The mark falls back to the stock `omarchy.nightlight` toggle if this plugin is ever
-disabled, so it keeps working either way.
+The mark runs `nightlight-auto` itself (status every five seconds, `toggle` on click)
+instead of reading this plugin's service. Omarchy's shell only hands a plugin its own
+service, so a mark living in the indicators widget cannot reach `contra.nightlight`'s,
+and the earlier version silently fell back to the stock toggle: hidden when off, and
+undone by the next step of the ramp. It still needs this plugin installed, because it
+calls the CLI from the plugin's folder.
 
 ## How this is different
 
